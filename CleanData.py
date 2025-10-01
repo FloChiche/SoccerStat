@@ -1,5 +1,5 @@
 import pandas as pd
 
-data = pd.read_csv("top5-players.csv")
-data.drop_duplicates()
-data.dropna()
+df = pd.read_csv("top5-players.csv")
+df = df.drop_duplicates()
+df = df.dropna()
