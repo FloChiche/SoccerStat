@@ -6,3 +6,4 @@ df = df.dropna()
 
 print(df.shape)
 print(df.isna().sum())
+df.to_csv("top5-players-clean.csv", index=False)
