@@ -1,5 +1,3 @@
-/* Styles globaux pour l'application Streamlit */
-
 :root {
   --primary: #1f77b4;
   --accent: #ff7f0e;
@@ -9,7 +7,6 @@ html, body {
   font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
 }
 
-/* Titres */
 .stApp h1 {
   color: var(--primary);
 }
@@ -18,17 +15,14 @@ html, body {
   color: #2c3e50;
 }
 
-/* Tableaux */
 .stDataFrame table {
   border-radius: 6px;
 }
 
-/* Légère bordure autour des cartes/colonnes */
 .block-container {
   padding-top: 1rem;
 }
 
-/* Info/Warning/Errors */
 .stAlert > div {
   border-left: 4px solid var(--primary);
 }

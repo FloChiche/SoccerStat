@@ -55,7 +55,7 @@ def section_overview(df: pd.DataFrame) -> None:
 def section_player_dashboard(df: pd.DataFrame) -> None:
     st.subheader("Dashboard individuel des joueurs")
 
-    # Filters
+    
     filter_cols = st.columns(4)
 
     with filter_cols[0]:
@@ -76,7 +76,7 @@ def section_player_dashboard(df: pd.DataFrame) -> None:
         squad_options = sorted(df.get("Squad", pd.Series(dtype=str)).dropna().unique()) if "Squad" in df.columns else []
         selected_squad = st.selectbox("Club (optionnel)", options=["Tous"] + list(squad_options))
 
-    # Apply filters
+    
     filtered = df.copy()
     if selected_pos != "Toutes" and "PrimaryPos" in filtered.columns:
         filtered = filtered[filtered["PrimaryPos"] == selected_pos]
@@ -87,7 +87,7 @@ def section_player_dashboard(df: pd.DataFrame) -> None:
     if selected_squad != "Tous" and "Squad" in filtered.columns:
         filtered = filtered[filtered["Squad"] == selected_squad]
 
-    # Metrics per player
+    
     metrics_cols = [
         col for col in [
             "Player", "Squad", "League", "PrimaryPos", "Age", "MP", "Starts", "Min",
@@ -98,7 +98,7 @@ def section_player_dashboard(df: pd.DataFrame) -> None:
 
     st.dataframe(filtered[metrics_cols].sort_values(by=["goals_per_match" if "goals_per_match" in metrics_cols else "Gls"], ascending=False), use_container_width=True)
 
-    # Small charts
+    
     chart_cols = st.columns(3)
     with chart_cols[0]:
         if {"Player", "goals_per_match"}.issubset(filtered.columns):
@@ -136,11 +136,11 @@ def section_league_comparison(df: pd.DataFrame) -> None:
         st.info("Colonne 'Comp' manquante, impossible d'extraire la ligue.")
         return
 
-    # Aggregate per league
+    
     agg_fields = {c: "sum" for c in [f for f in ["Gls", "Ast", "Min"] if f in df.columns]}
     agg_df = df.groupby("League", as_index=False).agg(agg_fields)
 
-    # Melt for faceted chart
+    
     melt_cols = [c for c in ["Gls", "Ast", "Min"] if c in agg_df.columns]
     chart_df = agg_df.melt(id_vars=["League"], value_vars=melt_cols, var_name="Metric", value_name="Valeur")
 
