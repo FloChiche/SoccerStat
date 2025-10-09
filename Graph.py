@@ -1,7 +1,490 @@
+import os
+
 import pandas as pd
 import streamlit as st
-import plotly.express as px
+import altair as alt
 
 
-df = pd.read_csv("top5-players-clean.csv")
+st.set_page_config(page_title="SoccerStat 23/24 - Top 5 Ligues", layout="wide")
+
+
+def charger_styles(css_path: str) -> None:
+    try:
+        with open(css_path, "r", encoding="utf-8") as f:
+            st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+    except Exception:
+        # Style optionnel, on ignore si manquant
+        pass
+
+
+@st.cache_data(show_spinner=False)
+def charger_donnees(csv_path: str) -> pd.DataFrame:
+    return _load_clean_data(csv_path)
+
+
+def _extract_primary_position(position_value: str) -> str:
+    if not isinstance(position_value, str) or not position_value:
+        return ""
+    return position_value.split(",")[0].strip()
+
+
+def _extract_country_code(nation_value: str):
+    if not isinstance(nation_value, str) or not nation_value:
+        return ("", "")
+    parts = nation_value.split()
+    if len(parts) >= 2:
+        return (parts[0], parts[1])
+    return (nation_value, nation_value)
+
+
+def _extract_competition_name(comp_value: str) -> str:
+    if not isinstance(comp_value, str) or not comp_value:
+        return ""
+    parts = comp_value.split(" ", 1)
+    if len(parts) == 2:
+        return parts[1].strip()
+    return comp_value
+
+
+def _compute_rate(numerator: pd.Series, denominator: pd.Series) -> pd.Series:
+    denom = denominator.replace({0: pd.NA})
+    return (numerator / denom).fillna(0)
+
+
+def _load_clean_data(csv_path: str) -> pd.DataFrame:
+    if not os.path.exists(csv_path):
+        raise FileNotFoundError(f"CSV introuvable: {csv_path}")
+
+    df = pd.read_csv(csv_path)
+    df = df.drop_duplicates().copy()
+
+    numeric_defaults = {col: 0 for col in [c for c in ["MP", "Min", "Gls", "Ast", "G+A", "90s"] if c in df.columns]}
+    df = df.fillna(value=numeric_defaults)
+
+    if "Nation" in df.columns:
+        nation_parsed = df["Nation"].apply(_extract_country_code)
+        df["NationLang"] = nation_parsed.apply(lambda t: t[0])
+        df["NationCode"] = nation_parsed.apply(lambda t: t[1])
+
+    if "Pos" in df.columns:
+        df["PrimaryPos"] = df["Pos"].apply(_extract_primary_position)
+
+    if "Comp" in df.columns:
+        df["League"] = df["Comp"].apply(_extract_competition_name)
+
+    if {"Gls", "MP"}.issubset(df.columns):
+        df["goals_per_match"] = _compute_rate(df["Gls"], df["MP"]) 
+    if {"Ast", "MP"}.issubset(df.columns):
+        df["assists_per_match"] = _compute_rate(df["Ast"], df["MP"]) 
+    if {"G+A", "MP"}.issubset(df.columns):
+        df["ga_per_match"] = _compute_rate(df["G+A"], df["MP"]) 
+
+    if "Gls_90" in df.columns:
+        df["goals_per_90"] = df["Gls_90"]
+    elif {"Gls", "90s"}.issubset(df.columns):
+        df["goals_per_90"] = _compute_rate(df["Gls"], df["90s"]) 
+
+    if "Ast_90" in df.columns:
+        df["assists_per_90"] = df["Ast_90"]
+    elif {"Ast", "90s"}.issubset(df.columns):
+        df["assists_per_90"] = _compute_rate(df["Ast"], df["90s"]) 
+
+    if {"Min", "MP"}.issubset(df.columns):
+        df["minutes_per_match"] = _compute_rate(df["Min"], df["MP"]) 
+
+    return df
+
+
+def _compute_overall_score(df: pd.DataFrame, metrics: list[str]) -> pd.Series:
+    """
+    Normalise chaque métrique (min-max) et renvoie la moyenne comme score global.
+    Ignore les colonnes absentes. Si variance nulle, attribue 0.
+    """
+    normed = []
+    for col in metrics:
+        if col not in df.columns:
+            continue
+        s = df[col].astype(float)
+        mn, mx = float(s.min()), float(s.max())
+        if mx == mn:
+            normed.append(pd.Series(0.0, index=df.index))
+        else:
+            normed.append((s - mn) / (mx - mn))
+    if not normed:
+        return pd.Series(0.0, index=df.index)
+    stacked = pd.concat(normed, axis=1)
+    return stacked.mean(axis=1)
+
+
+def vue_generale(df: pd.DataFrame) -> None:
+    st.subheader("Vue générale des joueurs")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.markdown("**Nombre de joueurs par position (primaire)**")
+        if "PrimaryPos" in df.columns:
+            pos_counts = df["PrimaryPos"].value_counts().reset_index()
+            pos_counts.columns = ["Position", "Joueurs"]
+            chart_pos = (
+                alt.Chart(pos_counts)
+                .mark_bar()
+                .encode(
+                    x=alt.X("Position:N", sort='-y', title="Position"),
+                    y=alt.Y("Joueurs:Q", title="Nombre de joueurs"),
+                    tooltip=["Position", "Joueurs"],
+                )
+                .properties(height=380)
+            )
+            st.altair_chart(chart_pos, use_container_width=True)
+        else:
+            st.info("Colonne 'Pos' manquante dans le dataset.")
+
+    with col2:
+        st.markdown("**Nombre de joueurs par nation (code FIFA)**")
+        nation_col = "NationCode" if "NationCode" in df.columns else ("Nation" if "Nation" in df.columns else None)
+        if nation_col:
+            nat_counts = df[nation_col].value_counts().reset_index()
+            nat_counts.columns = ["Nation", "Joueurs"]
+            chart_nat = (
+                alt.Chart(nat_counts)
+                .mark_bar()
+                .encode(
+                    x=alt.X("Nation:N", sort='-y', title="Nation (code)"),
+                    y=alt.Y("Joueurs:Q", title="Nombre de joueurs"),
+                    tooltip=["Nation", "Joueurs"],
+                )
+                .properties(height=380)
+            )
+            st.altair_chart(chart_nat, use_container_width=True)
+        else:
+            st.info("Colonne 'Nation' manquante dans le dataset.")
+
+    # Top 05 globaux (buts/match, assists/match, minutes)
+    st.divider()
+    gcols = st.columns(3)
+    with gcols[0]:
+        if {"Player", "goals_per_match"}.issubset(df.columns):
+            st.markdown("**Buts par match (top 05)**")
+            top = df.nlargest(5, "goals_per_match")[
+                ["Player", "goals_per_match"]
+            ]
+            st.altair_chart(
+                alt.Chart(top)
+                .mark_bar(color="#9AC5F4")
+                .encode(
+                    x=alt.X("goals_per_match:Q", title="Buts / match"),
+                    y=alt.Y("Player:N", sort='-x', title="Joueur"),
+                    tooltip=["Player", "goals_per_match"],
+                )
+                .properties(height=520),
+                use_container_width=True,
+            )
+    with gcols[1]:
+        if {"Player", "assists_per_match"}.issubset(df.columns):
+            st.markdown("**Assists par match (top 05)**")
+            top = df.nlargest(5, "assists_per_match")[
+                ["Player", "assists_per_match"]
+            ]
+            st.altair_chart(
+                alt.Chart(top)
+                .mark_bar(color="#6AA9FF")
+                .encode(
+                    x=alt.X("assists_per_match:Q", title="Assists / match"),
+                    y=alt.Y("Player:N", sort='-x', title="Joueur"),
+                    tooltip=["Player", "assists_per_match"],
+                )
+                .properties(height=520),
+                use_container_width=True,
+            )
+    with gcols[2]:
+        if {"Player", "Min"}.issubset(df.columns):
+            st.markdown("**Minutes jouées (top 05)**")
+            top = df.nlargest(5, "Min")[
+                ["Player", "Min"]
+            ]
+            st.altair_chart(
+                alt.Chart(top)
+                .mark_bar(color="#FFB36A")
+                .encode(
+                    x=alt.X("Min:Q", title="Minutes"),
+                    y=alt.Y("Player:N", sort='-x', title="Joueur"),
+                    tooltip=["Player", "Min"],
+                )
+                .properties(height=520),
+                use_container_width=True,
+            )
+
+
+def dashboard_individuel(df: pd.DataFrame) -> None:
+    st.subheader("Dashboard individuel des joueurs")
+
+    filt_cols = st.columns(4)
+
+    with filt_cols[0]:
+        pos_options = sorted([p for p in df.get("PrimaryPos", pd.Series(dtype=str)).dropna().unique() if p])
+        position = st.selectbox("Position", options=["Toutes"] + pos_options)
+
+    with filt_cols[1]:
+        min_mp = int(df.get("MP", pd.Series([0])).min()) if "MP" in df.columns else 0
+        max_mp = int(df.get("MP", pd.Series([0])).max()) if "MP" in df.columns else 0
+        mp_range = st.slider("Matches joués (MP)", min_value=min_mp, max_value=max_mp, value=(min_mp, max_mp))
+
+    with filt_cols[2]:
+        min_gls = int(df.get("Gls", pd.Series([0])).min()) if "Gls" in df.columns else 0
+        max_gls = int(df.get("Gls", pd.Series([0])).max()) if "Gls" in df.columns else 0
+        gls_range = st.slider("Buts (Gls)", min_value=min_gls, max_value=max_gls, value=(min_gls, max_gls))
+
+    with filt_cols[3]:
+        squads = sorted(df.get("Squad", pd.Series(dtype=str)).dropna().unique()) if "Squad" in df.columns else []
+        club = st.selectbox("Club (optionnel)", options=["Tous"] + list(squads))
+
+    # Application des filtres
+    data = df.copy()
+    if position != "Toutes" and "PrimaryPos" in data.columns:
+        data = data[data["PrimaryPos"] == position]
+    if "MP" in data.columns:
+        data = data[(data["MP"] >= mp_range[0]) & (data["MP"] <= mp_range[1])]
+    if "Gls" in data.columns:
+        data = data[(data["Gls"] >= gls_range[0]) & (data["Gls"] <= gls_range[1])]
+    if club != "Tous" and "Squad" in data.columns:
+        data = data[data["Squad"] == club]
+
+    # Afficher les TOP 20 pour toutes les métriques clés
+    metrics_all = [
+        ("Buts / match", "goals_per_match", "#9AC5F4"),
+        ("Assists / match", "assists_per_match", "#6AA9FF"),
+        ("Minutes", "Min", "#FFB36A"),
+    ]
+    mcols = st.columns(3)
+    for (label, col, color), container in zip(metrics_all, mcols):
+        if col in data.columns and not data.empty:
+            with container:
+                top20 = data.nlargest(20, col)[["Player", col]].copy()
+                st.markdown(f"**Top 20 — {label}**")
+                st.altair_chart(
+                    alt.Chart(top20)
+                    .mark_bar(color=color)
+                    .encode(
+                        x=alt.X(f"{col}:Q", title=label),
+                        y=alt.Y("Player:N", sort='-x', title="Joueur"),
+                        tooltip=["Player", col],
+                    )
+                    .properties(height=520),
+                    use_container_width=True,
+                )
+
+    # NOUVEAU: Score global multi-statistiques
+    st.divider()
+    st.markdown("**Meilleur joueur toutes statistiques confondues**")
+    score_cols = [
+        c for c in [
+            "goals_per_match", "assists_per_match", "ga_per_match",
+            "goals_per_90", "assists_per_90", "minutes_per_match",
+            "Gls", "Ast", "G+A", "Min", "MP", "Starts"
+        ] if c in data.columns
+    ]
+    if score_cols and not data.empty:
+        data = data.copy()
+        data["overall_score"] = _compute_overall_score(data, score_cols)
+        top_overall = data.nlargest(5, "overall_score")[
+            ["Player", "overall_score"]
+        ]
+        best_name = top_overall.iloc[0]["Player"] if not top_overall.empty else None
+        cols_over = st.columns([2, 5])
+        with cols_over[0]:
+            st.metric(label="Joueur n°1 (score global)", value=best_name if best_name else "-")
+        with cols_over[1]:
+            st.markdown("**Top 5 — Score global (toutes catégories)**")
+            st.altair_chart(
+                alt.Chart(top_overall)
+                .mark_bar(color="#A98DF0")
+                .encode(
+                    x=alt.X("overall_score:Q", title="Score global (0-1)"),
+                    y=alt.Y("Player:N", sort='-x', title="Joueur"),
+                    tooltip=["Player", "overall_score"],
+                )
+                .properties(height=320),
+                use_container_width=True,
+            )
+    else:
+        st.info("Impossible de calculer un score global (colonnes manquantes).")
+
+    # Sélection d'un joueur et comparaison au meilleur (par métrique et global)
+    joueurs_options = sorted(data["Player"].dropna().unique()) if "Player" in data.columns else []
+    selected_player = st.selectbox("Choisir un joueur", options=[""] + joueurs_options, index=0)
+
+    if selected_player:
+        # Déterminer le meilleur joueur pour chaque métrique séparément
+        leaders = {}
+        for _, col, _ in metrics_all:
+            if col in data.columns and not data.empty:
+                leader_row = data.nlargest(1, col)
+                leaders[col] = leader_row.iloc[0]["Player"] if not leader_row.empty else None
+
+        # Meilleur global
+        best_global = None
+        if "overall_score" in data.columns:
+            row_best = data.nlargest(1, "overall_score")
+            if not row_best.empty:
+                best_global = row_best.iloc[0]["Player"]
+
+        # Construire un DataFrame de comparaison pour chaque métrique
+        colonnes_info = [
+            c for c in [
+                "Player", "Squad", "League", "PrimaryPos", "Age", "MP", "Starts", "Min",
+                "Gls", "Ast", "G+A", "goals_per_match", "assists_per_match", "ga_per_match",
+                "goals_per_90", "assists_per_90", "minutes_per_match", "overall_score"
+            ] if c in data.columns
+        ]
+        st.markdown("**Statistiques du joueur sélectionné**")
+        st.dataframe(data[data["Player"] == selected_player][colonnes_info], use_container_width=True)
+
+        gcols = st.columns(3)
+        for (label, col, color), container in zip(metrics_all, gcols):
+            if col in data.columns and not data.empty:
+                leader = leaders.get(col)
+                compare_players = [p for p in [selected_player, leader] if p]
+                comp_df = data[data["Player"].isin(compare_players)][["Player", col]]
+                with container:
+                    st.markdown(f"{label} (comparé au meilleur)")
+                    st.altair_chart(
+                        alt.Chart(comp_df)
+                        .mark_bar(color=color)
+                        .encode(
+                            x=alt.X(f"{col}:Q", title=label),
+                            y=alt.Y("Player:N", sort='-x', title="Joueur"),
+                            tooltip=["Player", col],
+                        )
+                        .properties(height=360),
+                        use_container_width=True,
+                    )
+
+        # Comparaison du score global
+        if best_global:
+            st.markdown("**Score global (comparaison)**")
+            players = [p for p in [selected_player, best_global] if p]
+            comp_score = data[data["Player"].isin(players)][["Player", "overall_score"]]
+            st.altair_chart(
+                alt.Chart(comp_score)
+                .mark_bar(color="#A98DF0")
+                .encode(
+                    x=alt.X("overall_score:Q", title="Score global (0-1)"),
+                    y=alt.Y("Player:N", sort='-x', title="Joueur"),
+                    tooltip=["Player", "overall_score"],
+                )
+                .properties(height=300),
+                use_container_width=True,
+            )
+
+        # Nouvelle section: Comparaison sur TOUTES les statistiques du tableau
+        st.divider()
+        st.markdown("**Comparaison sur toutes les statistiques**")
+        metrics_full = [
+            ("MP", "MP"),
+            ("Starts", "Starts"),
+            ("Minutes", "Min"),
+            ("Buts", "Gls"),
+            ("Assists", "Ast"),
+            ("G+A", "G+A"),
+            ("Buts / match", "goals_per_match"),
+            ("Assists / match", "assists_per_match"),
+            ("G+A / match", "ga_per_match"),
+            ("Buts / 90", "goals_per_90"),
+            ("Assists / 90", "assists_per_90"),
+            ("Minutes / match", "minutes_per_match"),
+        ]
+        # Déterminer le meilleur pour chaque statistique
+        full_leaders = {}
+        for _, col in metrics_full:
+            if col in data.columns and not data.empty:
+                best_row = data.nlargest(1, col)
+                full_leaders[col] = best_row.iloc[0]["Player"] if not best_row.empty else None
+
+        # Afficher chaque statistique l'une sous l'autre
+        for label, col in metrics_full:
+            if col not in data.columns or data.empty:
+                continue
+            leader = full_leaders.get(col)
+            players = [p for p in [selected_player, leader] if p]
+            comp_df = data[data["Player"].isin(players)][["Player", col]].copy()
+            if comp_df.empty:
+                continue
+            st.markdown(label)
+            st.altair_chart(
+                alt.Chart(comp_df)
+                .mark_bar()
+                .encode(
+                    x=alt.X("Player:N", title="Joueur"),
+                    y=alt.Y(f"{col}:Q", title=label),
+                    color=alt.Color("Player:N", legend=alt.Legend(title="Joueur")),
+                    tooltip=["Player", col],
+                )
+                .properties(height=240),
+                use_container_width=True,
+            )
+    else:
+        # Aucun joueur sélectionné: rien d'autre à afficher
+        pass
+
+
+def comparaison_ligues(df: pd.DataFrame) -> None:
+    st.subheader("Comparaison des performances par ligue")
+
+    if "League" not in df.columns:
+        st.info("Colonne 'Comp' manquante, impossible d'extraire la ligue.")
+        return
+
+    aggregats = {c: "sum" for c in [f for f in ["Gls", "Ast", "Min"] if f in df.columns]}
+    agg_df = df.groupby("League", as_index=False).agg(aggregats)
+
+    variables = [c for c in ["Gls", "Ast", "Min"] if c in agg_df.columns]
+    chart_df = agg_df.melt(id_vars=["League"], value_vars=variables, var_name="Métrique", value_name="Valeur")
+
+    chart = (
+        alt.Chart(chart_df)
+        .mark_bar()
+        .encode(
+            x=alt.X("League:N", sort='-y', title="Ligue"),
+            y=alt.Y("Valeur:Q", title="Somme"),
+            color=alt.Color("Métrique:N", title="Métrique"),
+            column=alt.Column("Métrique:N", header=alt.Header(title=None)),
+            tooltip=["League", "Métrique", "Valeur"],
+        )
+        .resolve_scale(y='independent')
+        .properties(height=380)
+    )
+    st.altair_chart(chart, use_container_width=True)
+
+
+def main() -> None:
+    # Styles
+    default_css = os.path.join(os.path.dirname(__file__), "style.css")
+    charger_styles(default_css)
+
+    st.title("SoccerStat - Top 5 Ligues (Saison 2023/24)")
+    st.caption("Analyse des performances des joueurs dans les 5 grandes ligues.")
+
+    # Chargement des données
+    default_csv = os.path.join(os.path.dirname(__file__), "top5-players.csv")
+    csv_path = st.sidebar.text_input("Chemin du CSV", value=default_csv)
+
+    try:
+        df = charger_donnees(csv_path)
+    except Exception as e:
+        st.error(f"Erreur lors du chargement: {e}")
+        return
+
+    onglets = st.tabs(["Vue générale", "Dashboard individuel", "Comparaison par ligue"])
+    with onglets[0]:
+        vue_generale(df)
+    with onglets[1]:
+        dashboard_individuel(df)
+    with onglets[2]:
+        comparaison_ligues(df)
+
+
+if __name__ == "__main__":
+    main()
+
 
