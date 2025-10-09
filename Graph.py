@@ -5,7 +5,7 @@ import pandas as pd
 import streamlit as st
 import altair as alt
 
-st.set_page_config(page_title="SoccerStat 23/24 - Top 5 Ligues", layout="wide")
+st.set_page_config(page_title="SoccerStat", layout="wide")
 
 
 def charger_styles(css_path: str) -> None:
@@ -15,7 +15,6 @@ def charger_styles(css_path: str) -> None:
         with open(css_path, "r", encoding="utf-8") as f:
             st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
     except Exception:
-        # ne pas interrompre l'application pour un css manquant / invalide
         return
 
 
@@ -31,20 +30,11 @@ def _extract_primary_position(position_value: str) -> str:
 
 
 def _extract_country_code(nation_value: str) -> Tuple[str, str]:
-    """
-    Retourne (code, nom) si possible.
-    Exemples:
-      "FRA France" -> ("FRA", "France")
-      "France" -> ("FRA", "France") si on ne connaît pas le code on place le même nom en second
-      "" ou NaN -> ("", "")
-    """
     if not isinstance(nation_value, str) or not nation_value.strip():
         return ("", "")
     parts = nation_value.strip().split()
     if len(parts) >= 2 and len(parts[0]) <= 3:
-        # forme probable "FRA France" ou "ENG England"
         return (parts[0], " ".join(parts[1:]))
-    # sinon pas de code, renvoyer nom en second champ et laisser code vide
     return ("", nation_value.strip())
 
 
@@ -69,31 +59,27 @@ def _load_clean_data(csv_path: str) -> pd.DataFrame:
 
     df = pd.read_csv(csv_path)
     df = df.drop_duplicates().copy()
-
-    # Normaliser les noms de colonnes (strip)
     df.columns = [c.strip() for c in df.columns]
 
-    # Colonnes numériques attendues -> forcer conversion si présentes
     numeric_cols = ["MP", "Min", "Gls", "Ast", "G+A", "90s", "Gls_90", "Ast_90", "Starts"]
     for col in numeric_cols:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
 
-    # Nation parsing
     if "Nation" in df.columns:
         nation_parsed = df["Nation"].apply(_extract_country_code)
         df["NationCode"] = nation_parsed.apply(lambda t: t[0])
         df["NationLang"] = nation_parsed.apply(lambda t: t[1])
 
-    # Position parsing
+
     if "Pos" in df.columns:
         df["PrimaryPos"] = df["Pos"].apply(_extract_primary_position)
 
-    # Competition -> League
+
     if "Comp" in df.columns:
         df["League"] = df["Comp"].apply(_extract_competition_name)
 
-    # Taux / per-match / per-90
+
     if {"Gls", "MP"}.issubset(df.columns):
         df["goals_per_match"] = _compute_rate(df["Gls"], df["MP"])
     if {"Ast", "MP"}.issubset(df.columns):
@@ -114,7 +100,7 @@ def _load_clean_data(csv_path: str) -> pd.DataFrame:
     if {"Min", "MP"}.issubset(df.columns):
         df["minutes_per_match"] = _compute_rate(df["Min"], df["MP"])
 
-    # Calculer overall_score centralisé si possible (garder en 0-1)
+
     score_cols = [
         c for c in [
             "goals_per_match", "assists_per_match", "ga_per_match",
@@ -221,7 +207,7 @@ def vue_generale(df: pd.DataFrame) -> None:
             use_container_width=True,
         )
 
-    # Top 5 — Score global (toutes catégories)
+
     st.divider()
     st.markdown("**Top 5 — Score global (toutes catégories)**")
     if "overall_score" in df.columns and not df.empty:
@@ -486,12 +472,10 @@ def comparaison_joueurs(df: pd.DataFrame) -> None:
         ] if c in df.columns
     ]
     if score_cols:
-        # Calculer overall_score localement pour les joueurs comparés
         try:
             sous_df["overall_score"] = _compute_overall_score(sous_df, score_cols)
             metrics_full.append(("Score global (0-1)", "overall_score"))
         except Exception:
-            # en cas d'erreur, ne pas planter
             pass
 
     disponibles = [(label, col) for (label, col) in metrics_full if col in sous_df.columns]
