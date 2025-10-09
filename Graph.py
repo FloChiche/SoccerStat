@@ -13,7 +13,7 @@ def charger_styles(css_path: str) -> None:
         with open(css_path, "r", encoding="utf-8") as f:
             st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
     except Exception:
-        # Style optionnel, on ignore si manquant
+        
         pass
 
 
@@ -96,10 +96,6 @@ def _load_clean_data(csv_path: str) -> pd.DataFrame:
 
 
 def _compute_overall_score(df: pd.DataFrame, metrics: list[str]) -> pd.Series:
-    """
-    Normalise chaque métrique (min-max) et renvoie la moyenne comme score global.
-    Ignore les colonnes absentes. Si variance nulle, attribue 0.
-    """
     normed = []
     for col in metrics:
         if col not in df.columns:
@@ -160,7 +156,7 @@ def vue_generale(df: pd.DataFrame) -> None:
         else:
             st.info("Colonne 'Nation' manquante dans le dataset.")
 
-    # TOP 20 unique avec choix de catégorie
+    
     st.divider()
     st.markdown("**TOP 20**")
     metric_options = {
@@ -248,7 +244,7 @@ def dashboard_individuel(df: pd.DataFrame) -> None:
         squads = sorted(df.get("Squad", pd.Series(dtype=str)).dropna().unique()) if "Squad" in df.columns else []
         club = st.selectbox("Club (optionnel)", options=["Tous"] + list(squads))
 
-    # Application des filtres
+
     data = df.copy()
     if position != "Toutes" and "PrimaryPos" in data.columns:
         data = data[data["PrimaryPos"] == position]
@@ -259,35 +255,35 @@ def dashboard_individuel(df: pd.DataFrame) -> None:
     if club != "Tous" and "Squad" in data.columns:
         data = data[data["Squad"] == club]
 
-    # Définition des métriques clés (réutilisées plus bas)
+    
     metrics_all = [
         ("Buts / match", "goals_per_match", "#9AC5F4"),
         ("Assists / match", "assists_per_match", "#6AA9FF"),
         ("Minutes", "Min", "#FFB36A"),
     ]
 
-    # Score global déplacé dans Vue générale
+    
 
-    # Sélection d'un joueur et comparaison au meilleur (par métrique et global)
+
     joueurs_options = sorted(data["Player"].dropna().unique()) if "Player" in data.columns else []
     selected_player = st.selectbox("Choisir un joueur", options=[""] + joueurs_options, index=0)
 
     if selected_player:
-        # Déterminer le meilleur joueur pour chaque métrique séparément
+
         leaders = {}
         for _, col, _ in metrics_all:
             if col in data.columns and not data.empty:
                 leader_row = data.nlargest(1, col)
                 leaders[col] = leader_row.iloc[0]["Player"] if not leader_row.empty else None
 
-        # Meilleur global
+
         best_global = None
         if "overall_score" in data.columns:
             row_best = data.nlargest(1, "overall_score")
             if not row_best.empty:
                 best_global = row_best.iloc[0]["Player"]
 
-        # Construire un DataFrame de comparaison pour chaque métrique
+
         colonnes_info = [
             c for c in [
                 "Player", "Squad", "League", "PrimaryPos", "Age", "MP", "Starts", "Min",
@@ -318,7 +314,7 @@ def dashboard_individuel(df: pd.DataFrame) -> None:
                         use_container_width=True,
                     )
 
-        # Comparaison du score global
+
         if best_global:
             st.markdown("**Score global (comparaison)**")
             players = [p for p in [selected_player, best_global] if p]
@@ -335,7 +331,7 @@ def dashboard_individuel(df: pd.DataFrame) -> None:
                 use_container_width=True,
             )
 
-        # Nouvelle section: Comparaison sur TOUTES les statistiques du tableau
+
         st.divider()
         st.markdown("**Comparaison sur toutes les statistiques**")
         metrics_full = [
@@ -352,14 +348,14 @@ def dashboard_individuel(df: pd.DataFrame) -> None:
             ("Assists / 90", "assists_per_90"),
             ("Minutes / match", "minutes_per_match"),
         ]
-        # Déterminer le meilleur pour chaque statistique
+
         full_leaders = {}
         for _, col in metrics_full:
             if col in data.columns and not data.empty:
                 best_row = data.nlargest(1, col)
                 full_leaders[col] = best_row.iloc[0]["Player"] if not best_row.empty else None
 
-        # Afficher chaque statistique l'une sous l'autre
+
         for label, col in metrics_full:
             if col not in data.columns or data.empty:
                 continue
@@ -382,7 +378,7 @@ def dashboard_individuel(df: pd.DataFrame) -> None:
                 use_container_width=True,
             )
     else:
-        # Aucun joueur sélectionné: rien d'autre à afficher
+
         pass
 
 
@@ -415,15 +411,133 @@ def comparaison_ligues(df: pd.DataFrame) -> None:
     st.altair_chart(chart, use_container_width=True)
 
 
+def comparaison_joueurs(df: pd.DataFrame) -> None:
+    st.subheader("Comparaison par joueur")
+
+    if "Player" not in df.columns:
+        st.info("Colonne 'Player' manquante dans le dataset.")
+        return
+
+    joueurs = sorted(df["Player"].dropna().unique())
+    csel1, csel2 = st.columns(2)
+    with csel1:
+        joueur1 = st.selectbox("Joueur 1", options=[""] + list(joueurs), index=0, key="cmp_player_1")
+    with csel2:
+        options_j2 = [p for p in joueurs if p != joueur1]
+        joueur2 = st.selectbox("Joueur 2", options=[""] + options_j2, index=0, key="cmp_player_2")
+
+    if not joueur1 or not joueur2:
+        st.info("Sélectionnez deux joueurs pour lancer la comparaison.")
+        return
+
+    sous_df = df[df["Player"].isin([joueur1, joueur2])].copy()
+
+    info_cols = [
+        c for c in [
+            "Player", "Squad", "League", "PrimaryPos", "Age", "MP", "Starts", "Min",
+        ] if c in sous_df.columns
+    ]
+
+    col_a, col_b = st.columns(2)
+    with col_a:
+        st.markdown(f"**{joueur1}**")
+        st.dataframe(sous_df[sous_df["Player"] == joueur1][info_cols], use_container_width=True)
+    with col_b:
+        st.markdown(f"**{joueur2}**")
+        st.dataframe(sous_df[sous_df["Player"] == joueur2][info_cols], use_container_width=True)
+
+    st.divider()
+
+    metrics_full = [
+        ("MP", "MP"),
+        ("Starts", "Starts"),
+        ("Minutes", "Min"),
+        ("Buts", "Gls"),
+        ("Assists", "Ast"),
+        ("G+A", "G+A"),
+        ("Buts / match", "goals_per_match"),
+        ("Assists / match", "assists_per_match"),
+        ("G+A / match", "ga_per_match"),
+        ("Buts / 90", "goals_per_90"),
+        ("Assists / 90", "assists_per_90"),
+        ("Minutes / match", "minutes_per_match"),
+    ]
+
+    score_cols = [
+        c for c in [
+            "goals_per_match", "assists_per_match", "ga_per_match",
+            "goals_per_90", "assists_per_90", "minutes_per_match",
+            "Gls", "Ast", "G+A", "Min", "MP", "Starts",
+        ] if c in df.columns
+    ]
+    if score_cols:
+        try:
+            sous_df = sous_df.copy()
+            sous_df["overall_score"] = _compute_overall_score(df, score_cols).loc[sous_df.index]
+            metrics_full.append(("Score global (0-1)", "overall_score"))
+        except Exception:
+            pass
+
+
+    disponibles = [(label, col) for (label, col) in metrics_full if col in sous_df.columns]
+    labels_disponibles = [label for (label, _) in disponibles]
+    defauts = [l for l in ["Buts", "Assists", "G+A", "Buts / match", "Assists / match"] if l in labels_disponibles]
+    if not defauts:
+        defauts = labels_disponibles[:4]
+    labels_selectionnes = st.multiselect(
+        "Métriques à comparer",
+        options=labels_disponibles,
+        default=defauts,
+        help="Choisissez les statistiques à afficher."
+    )
+    selection = [(label, col) for (label, col) in disponibles if label in labels_selectionnes]
+    if not selection:
+        st.info("Sélectionnez au moins une métrique à comparer.")
+        return
+
+    lignes = []
+    ordre_metrics = []
+    for label, col in selection:
+        if col not in sous_df.columns:
+            continue
+        ordre_metrics.append(label)
+        for _, row in sous_df.iterrows():
+            lignes.append({
+                "Player": row["Player"],
+                "Métrique": label,
+                "Valeur": float(row[col]) if pd.notna(row[col]) else 0.0,
+            })
+    if not lignes:
+        st.info("Aucune métrique comparable disponible pour ces joueurs.")
+        return
+
+    long_df = pd.DataFrame(lignes)
+
+    st.markdown("**Comparaison des métriques clés**")
+    for label in ordre_metrics:
+        sub = long_df[long_df["Métrique"] == label][["Player", "Valeur"]].copy()
+        sub = sub.rename(columns={"Valeur": label})
+        st.markdown(label)
+        st.altair_chart(
+            alt.Chart(sub)
+            .mark_bar()
+            .encode(
+                x=alt.X("Player:N", title="Joueur"),
+                y=alt.Y(f"{label}:Q", title=label),
+                color=alt.Color("Player:N", legend=alt.Legend(title="Joueur")),
+                tooltip=["Player", label],
+            )
+            .properties(height=280),
+            use_container_width=True,
+        )
+
 def main() -> None:
-    # Styles
     default_css = os.path.join(os.path.dirname(__file__), "style.css")
     charger_styles(default_css)
 
     st.title("SoccerStat - Top 5 Ligues (Saison 2023/24)")
     st.caption("Analyse des performances des joueurs dans les 5 grandes ligues.")
 
-    # Chargement des données
     default_csv = os.path.join(os.path.dirname(__file__), "top5-players.csv")
     csv_path = st.sidebar.text_input("Chemin du CSV", value=default_csv)
 
@@ -433,13 +547,15 @@ def main() -> None:
         st.error(f"Erreur lors du chargement: {e}")
         return
 
-    onglets = st.tabs(["Vue générale", "Dashboard individuel", "Comparaison par ligue"])
+    onglets = st.tabs(["Vue générale", "Dashboard individuel", "Comparaison par ligue", "Comparaison par joueur"])
     with onglets[0]:
         vue_generale(df)
     with onglets[1]:
         dashboard_individuel(df)
     with onglets[2]:
         comparaison_ligues(df)
+    with onglets[3]:
+        comparaison_joueurs(df)
 
 
 if __name__ == "__main__":
