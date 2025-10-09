@@ -160,58 +160,67 @@ def vue_generale(df: pd.DataFrame) -> None:
         else:
             st.info("Colonne 'Nation' manquante dans le dataset.")
 
-    # Top 05 globaux (buts/match, assists/match, minutes)
+    # TOP 20 unique avec choix de catégorie
     st.divider()
-    gcols = st.columns(3)
-    with gcols[0]:
-        if {"Player", "goals_per_match"}.issubset(df.columns):
-            st.markdown("**Buts par match (top 05)**")
-            top = df.nlargest(5, "goals_per_match")[
-                ["Player", "goals_per_match"]
-            ]
-            st.altair_chart(
-                alt.Chart(top)
-                .mark_bar(color="#9AC5F4")
-                .encode(
-                    x=alt.X("goals_per_match:Q", title="Buts / match"),
-                    y=alt.Y("Player:N", sort='-x', title="Joueur"),
-                    tooltip=["Player", "goals_per_match"],
-                )
-                .properties(height=520),
-                use_container_width=True,
+    st.markdown("**TOP 20**")
+    metric_options = {
+        "Buts / match": "goals_per_match",
+        "Assists / match": "assists_per_match",
+        "Minutes": "Min",
+        "Buts": "Gls",
+        "Assists": "Ast",
+        "G+A": "G+A",
+    }
+    available = {label: col for label, col in metric_options.items() if col in df.columns}
+    if not available:
+        st.info("Aucune métrique disponible pour le TOP 20.")
+    else:
+        label_default = next(iter(available.keys()))
+        chosen_label = st.selectbox("Catégorie", options=list(available.keys()), index=list(available.keys()).index(label_default))
+        chosen_col = available[chosen_label]
+        top = df.nlargest(20, chosen_col)[["Player", chosen_col]]
+        st.altair_chart(
+            alt.Chart(top)
+            .mark_bar(color="#6AA9FF")
+            .encode(
+                x=alt.X(f"{chosen_col}:Q", title=chosen_label),
+                y=alt.Y("Player:N", sort='-x', title="Joueur"),
+                tooltip=["Player", chosen_col],
             )
-    with gcols[1]:
-        if {"Player", "assists_per_match"}.issubset(df.columns):
-            st.markdown("**Assists par match (top 05)**")
-            top = df.nlargest(5, "assists_per_match")[
-                ["Player", "assists_per_match"]
-            ]
+            .properties(height=520),
+            use_container_width=True,
+        )
+
+    # Top 5 — Score global (toutes catégories)
+    st.divider()
+    st.markdown("**Top 5 — Score global (toutes catégories)**")
+    score_cols = [
+        c for c in [
+            "goals_per_match", "assists_per_match", "ga_per_match",
+            "goals_per_90", "assists_per_90", "minutes_per_match",
+            "Gls", "Ast", "G+A", "Min", "MP", "Starts"
+        ] if c in df.columns
+    ]
+    if score_cols and not df.empty:
+        df_over = df.copy()
+        df_over["overall_score"] = _compute_overall_score(df_over, score_cols)
+        top_overall = df_over.nlargest(5, "overall_score")[
+            ["Player", "overall_score"]
+        ]
+        best_name = top_overall.iloc[0]["Player"] if not top_overall.empty else None
+        cols_over = st.columns([2, 5])
+        with cols_over[0]:
+            st.metric(label="Joueur n°1 (score global)", value=best_name if best_name else "-")
+        with cols_over[1]:
             st.altair_chart(
-                alt.Chart(top)
-                .mark_bar(color="#6AA9FF")
+                alt.Chart(top_overall)
+                .mark_bar(color="#A98DF0")
                 .encode(
-                    x=alt.X("assists_per_match:Q", title="Assists / match"),
+                    x=alt.X("overall_score:Q", title="Score global (0-1)"),
                     y=alt.Y("Player:N", sort='-x', title="Joueur"),
-                    tooltip=["Player", "assists_per_match"],
+                    tooltip=["Player", "overall_score"],
                 )
-                .properties(height=520),
-                use_container_width=True,
-            )
-    with gcols[2]:
-        if {"Player", "Min"}.issubset(df.columns):
-            st.markdown("**Minutes jouées (top 05)**")
-            top = df.nlargest(5, "Min")[
-                ["Player", "Min"]
-            ]
-            st.altair_chart(
-                alt.Chart(top)
-                .mark_bar(color="#FFB36A")
-                .encode(
-                    x=alt.X("Min:Q", title="Minutes"),
-                    y=alt.Y("Player:N", sort='-x', title="Joueur"),
-                    tooltip=["Player", "Min"],
-                )
-                .properties(height=520),
+                .properties(height=320),
                 use_container_width=True,
             )
 
@@ -250,65 +259,14 @@ def dashboard_individuel(df: pd.DataFrame) -> None:
     if club != "Tous" and "Squad" in data.columns:
         data = data[data["Squad"] == club]
 
-    # Afficher les TOP 20 pour toutes les métriques clés
+    # Définition des métriques clés (réutilisées plus bas)
     metrics_all = [
         ("Buts / match", "goals_per_match", "#9AC5F4"),
         ("Assists / match", "assists_per_match", "#6AA9FF"),
         ("Minutes", "Min", "#FFB36A"),
     ]
-    mcols = st.columns(3)
-    for (label, col, color), container in zip(metrics_all, mcols):
-        if col in data.columns and not data.empty:
-            with container:
-                top20 = data.nlargest(20, col)[["Player", col]].copy()
-                st.markdown(f"**Top 20 — {label}**")
-                st.altair_chart(
-                    alt.Chart(top20)
-                    .mark_bar(color=color)
-                    .encode(
-                        x=alt.X(f"{col}:Q", title=label),
-                        y=alt.Y("Player:N", sort='-x', title="Joueur"),
-                        tooltip=["Player", col],
-                    )
-                    .properties(height=520),
-                    use_container_width=True,
-                )
 
-    # NOUVEAU: Score global multi-statistiques
-    st.divider()
-    st.markdown("**Meilleur joueur toutes statistiques confondues**")
-    score_cols = [
-        c for c in [
-            "goals_per_match", "assists_per_match", "ga_per_match",
-            "goals_per_90", "assists_per_90", "minutes_per_match",
-            "Gls", "Ast", "G+A", "Min", "MP", "Starts"
-        ] if c in data.columns
-    ]
-    if score_cols and not data.empty:
-        data = data.copy()
-        data["overall_score"] = _compute_overall_score(data, score_cols)
-        top_overall = data.nlargest(5, "overall_score")[
-            ["Player", "overall_score"]
-        ]
-        best_name = top_overall.iloc[0]["Player"] if not top_overall.empty else None
-        cols_over = st.columns([2, 5])
-        with cols_over[0]:
-            st.metric(label="Joueur n°1 (score global)", value=best_name if best_name else "-")
-        with cols_over[1]:
-            st.markdown("**Top 5 — Score global (toutes catégories)**")
-            st.altair_chart(
-                alt.Chart(top_overall)
-                .mark_bar(color="#A98DF0")
-                .encode(
-                    x=alt.X("overall_score:Q", title="Score global (0-1)"),
-                    y=alt.Y("Player:N", sort='-x', title="Joueur"),
-                    tooltip=["Player", "overall_score"],
-                )
-                .properties(height=320),
-                use_container_width=True,
-            )
-    else:
-        st.info("Impossible de calculer un score global (colonnes manquantes).")
+    # Score global déplacé dans Vue générale
 
     # Sélection d'un joueur et comparaison au meilleur (par métrique et global)
     joueurs_options = sorted(data["Player"].dropna().unique()) if "Player" in data.columns else []
