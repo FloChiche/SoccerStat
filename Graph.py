@@ -71,14 +71,11 @@ def _load_clean_data(csv_path: str) -> pd.DataFrame:
         df["NationCode"] = nation_parsed.apply(lambda t: t[0])
         df["NationLang"] = nation_parsed.apply(lambda t: t[1])
 
-
     if "Pos" in df.columns:
         df["PrimaryPos"] = df["Pos"].apply(_extract_primary_position)
 
-
     if "Comp" in df.columns:
         df["League"] = df["Comp"].apply(_extract_competition_name)
-
 
     if {"Gls", "MP"}.issubset(df.columns):
         df["goals_per_match"] = _compute_rate(df["Gls"], df["MP"])
@@ -99,7 +96,6 @@ def _load_clean_data(csv_path: str) -> pd.DataFrame:
 
     if {"Min", "MP"}.issubset(df.columns):
         df["minutes_per_match"] = _compute_rate(df["Min"], df["MP"])
-
 
     score_cols = [
         c for c in [
@@ -139,7 +135,7 @@ def vue_generale(df: pd.DataFrame) -> None:
     col1, col2 = st.columns(2)
 
     with col1:
-        st.markdown("**Nombre de joueurs par position (primaire)**")
+        st.markdown("**Nombre de joueurs par poste**")
         if "PrimaryPos" in df.columns:
             pos_counts = df["PrimaryPos"].value_counts().reset_index()
             pos_counts.columns = ["Position", "Joueurs"]
@@ -158,7 +154,7 @@ def vue_generale(df: pd.DataFrame) -> None:
             st.info("Colonne 'Pos' manquante dans le dataset.")
 
     with col2:
-        st.markdown("**Nombre de joueurs par nation (code / nom)**")
+        st.markdown("**Nombre de joueurs par nation**")
         nation_col = "NationCode" if "NationCode" in df.columns else ("NationLang" if "NationLang" in df.columns else None)
         if nation_col:
             nat_counts = df[nation_col].value_counts().reset_index()
@@ -206,7 +202,6 @@ def vue_generale(df: pd.DataFrame) -> None:
             .properties(height=520),
             use_container_width=True,
         )
-
 
     st.divider()
     st.markdown("**Top 5 — Score global (toutes catégories)**")
@@ -273,18 +268,6 @@ def dashboard_individuel(df: pd.DataFrame) -> None:
     selected_player = st.selectbox("Choisir un joueur", options=[""] + joueurs_options, index=0)
 
     if selected_player:
-        leaders = {}
-        for _, col, _ in metrics_all:
-            if col in data.columns and not data.empty:
-                leader_row = data.nlargest(1, col)
-                leaders[col] = leader_row.iloc[0]["Player"] if not leader_row.empty else None
-
-        best_global = None
-        if "overall_score" in data.columns:
-            row_best = data.nlargest(1, "overall_score")
-            if not row_best.empty:
-                best_global = row_best.iloc[0]["Player"]
-
         colonnes_info = [
             c for c in [
                 "Player", "Squad", "League", "PrimaryPos", "Age", "MP", "Starts", "Min",
@@ -298,11 +281,9 @@ def dashboard_individuel(df: pd.DataFrame) -> None:
         gcols = st.columns(3)
         for (label, col, color), container in zip(metrics_all, gcols):
             if col in data.columns and not data.empty:
-                leader = leaders.get(col)
-                compare_players = [p for p in [selected_player, leader] if p]
-                comp_df = data[data["Player"].isin(compare_players)][["Player", col]]
+                comp_df = data[data["Player"] == selected_player][["Player", col]]
                 with container:
-                    st.markdown(f"{label} (comparé au meilleur)")
+                    st.markdown(f"{label}")
                     st.altair_chart(
                         alt.Chart(comp_df)
                         .mark_bar()
@@ -314,22 +295,6 @@ def dashboard_individuel(df: pd.DataFrame) -> None:
                         .properties(height=360),
                         use_container_width=True,
                     )
-
-        if best_global:
-            st.markdown("**Score global (comparaison)**")
-            players = [p for p in [selected_player, best_global] if p]
-            comp_score = data[data["Player"].isin(players)][["Player", "overall_score"]]
-            st.altair_chart(
-                alt.Chart(comp_score)
-                .mark_bar()
-                .encode(
-                    x=alt.X("overall_score:Q", title="Score global (0-1)"),
-                    y=alt.Y("Player:N", sort='-x', title="Joueur"),
-                    tooltip=["Player", "overall_score"],
-                )
-                .properties(height=300),
-                use_container_width=True,
-            )
 
         st.divider()
         st.markdown("**Comparaison sur toutes les statistiques**")
@@ -348,18 +313,10 @@ def dashboard_individuel(df: pd.DataFrame) -> None:
             ("Minutes / match", "minutes_per_match"),
         ]
 
-        full_leaders = {}
-        for _, col in metrics_full:
-            if col in data.columns and not data.empty:
-                best_row = data.nlargest(1, col)
-                full_leaders[col] = best_row.iloc[0]["Player"] if not best_row.empty else None
-
         for label, col in metrics_full:
             if col not in data.columns or data.empty:
                 continue
-            leader = full_leaders.get(col)
-            players = [p for p in [selected_player, leader] if p]
-            comp_df = data[data["Player"].isin(players)][["Player", col]].copy()
+            comp_df = data[data["Player"] == selected_player][["Player", col]].copy()
             if comp_df.empty:
                 continue
             st.markdown(label)
@@ -560,4 +517,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-    
